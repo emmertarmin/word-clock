@@ -1,291 +1,521 @@
-/* 
-  Arduino + Neopixel Word Clock Code
-  by: Alex - Super Make Something
-  date: August 16, 2015
-  license: Public domain.  Please use, reuse, and modify this sketch!
-  additional: modified from "simple.ino" NeoPixel example sketch by Shae Erisson of Adafruit Industries.  
-  
-  NOTE: REQUIRES NEOPIXEL & TIME LIBRARIES TO BE INSTALLED UNDER ...\Arduino\libraries
-  NEOPIXEL LIBRARY AVAILABLE AT: https://github.com/adafruit/Adafruit_NeoPixel
-  TIME LIBRARY AVAILABLE AT: https://github.com/PaulStoffregen/Time
-  
-  Explanation: This code lights up Neopixels corresponding to the current time.
-  Time is kept using the time library.
-  Neopixels are lit using the Adafruit Neopixel library.
-  
-  Depending on the current time, flags to light corresponding Neopixels are saved in an array
-  After parsing the time, Neopixels are turned on/off according to the flags using a for loop
-*/
+/**
+ * This is the more completely documented example! (see below)
+ */
+
+/* ======================= includes ================================= */
 
 #include <Adafruit_NeoPixel.h>
-#include <avr/power.h>
-#include "Time.h"
-
-// Which pin on the Arduino is connected to the NeoPixels?
-#define PIN 6
+#ifdef __AVR__
+ #include <avr/power.h> // Required for 16 MHz Adafruit Trinket
+#endif
+#include <Wire.h>
+#include "RTClib.h"
 
 // How many NeoPixels are attached to the Arduino?
-#define NUMPIXELS 110
 
-// When we setup the NeoPixel library, we tell it how many pixels, and which pin to use to send signals.
-// Note that for older NeoPixel strips you might need to change the third parameter--see the strandtest
-// example for more information on possible values.
-Adafruit_NeoPixel pixels = Adafruit_NeoPixel(NUMPIXELS, PIN, NEO_GRB + NEO_KHZ800);
+// When setting up the NeoPixel library, we tell it how many pixels,
+// and which pin to use to send signals. Note that for older NeoPixel
+// strips you might need to change the third parameter -- see the
+// strandtest example for more information on possible values.
 
-// Declare integer array with size corresponding to number of Neopixels in chain
-// int individualPixels[NUMPIXELS];
+void colorAll(uint32_t c, uint8_t wait);
+void colorWipe(uint32_t c, uint8_t wait);
+void rainbow(uint8_t wait);
+void rainbowCycle(uint8_t wait);
+uint32_t Wheel(byte WheelPos);
+void heartShape(uint8_t wait);
+void timeDisplay(uint8_t h, uint8_t m);
 
-//Declare pins for decrementing/incrementing current time by 5 minutes
-#define MINUSFIVEMINS 4
-#define PLUSFIVEMINS  5
+/* ======================= extra-examples.cpp ======================== */
 
-//Declare pins for addition button 5V/GND sources
-#define BUTTONLEDMINUS_GND1 8
-#define BUTTONLEDMINUS_GND2 9
-#define BUTTONLEDPLUS_GND1 10
-#define BUTTONLEDPLUS_GND2 11
 
-#define BUTTONLEDMINUS_5V1 A0
-#define BUTTONLEDMINUS_5V2 A1
-#define BUTTONLEDPLUS_5V1 A2
-#define BUTTONLEDPLUS_5V2 A3
+// IMPORTANT: Set pixel COUNT, PIN and TYPE
+#define PIXEL_COUNT 110
+#define PIXEL_PIN 6
+#define PIXEL_TYPE WS2812B2
 
-// Current and previous states for button pins -- in setup initialize all to HIGH
-int minusPrevState=HIGH;
-int minusCurrState=HIGH;
-int plusPrevState=HIGH;
-int plusCurrState=HIGH;
+// Parameter 1 = number of pixels in strip
+//               note: for some stripes like those with the TM1829, you
+//                     need to count the number of segments, i.e. the
+//                     number of controllers in your stripe, not the number
+//                     of individual LEDs!
+//
+// Parameter 2 = pin number (if not specified, D2 is selected for you)
+//
+//               On Photon, Electron, P1, Core and Duo, any pin can be used for Neopixel.
+//
+//               On the Argon, Boron and Xenon, only these pins can be used for Neopixel:
+//               - D2, D3, A4, A5
+//               - D4, D6, D7, D8
+//               - A0, A1, A2, A3
+//
+//               In addition on the Argon/Boron/Xenon, only one pin per group can be used
+//               at a time. So it's OK to have one Adafruit_NeoPixel instance on pin D2 and
+//               another one on pin A2, but it's not possible to have one on pin A0 and
+//               another one on pin A1.
+//
+// Parameter 3 = pixel type [ WS2812, WS2812B, WS2812B2, WS2813, WS2811,
+//                            TM1803, TM1829, SK6812RGBW, WS2812B_FAST,
+//                            WS2812B2_FAST ]
+//               note: if not specified, WS2812B is selected for you which
+//                     is the same as WS2812 or WS2813 in operation.
+//               note: RGB order is automatically applied to WS2811,
+//                     WS2812/WS2812B/WS2812B2/WS2813/TM1803 is GRB order.
+//               note: For legacy 50us reset pulse timing on WS2812/WS2812B
+//                     or WS2812B2, select WS2812B_FAST or WS2812B2_FAST
+//                     respectively.  Otherwise 300us timing will be used.
+//
+// 800 KHz bitstream 800 KHz bitstream (most NeoPixel products
+//               WS2812/WS2813 (6-pin part)/WS2812B (4-pin part)/SK6812RGBW (RGB+W) )
+//
+// 400 KHz bitstream (classic 'v1' (not v2) FLORA pixels, WS2811 drivers)
+//                   (Radio Shack Tri-Color LED Strip - TM1803 driver
+//                    NOTE: RS Tri-Color LED's are grouped in sets of 3)
 
-// Time variables
-int h;
-int m;
-int s;
+Adafruit_NeoPixel strip(PIXEL_COUNT, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-// RGB color variables
-int red=0;
-int green=0;
-int blue=255;
+// IMPORTANT: To reduce NeoPixel burnout risk, add 1000 uF capacitor across
+// pixel power leads, add 300 - 500 Ohm resistor on first pixel's data input
+// and minimize distance between Arduino and first pixel.  Avoid connecting
+// on a live circuit...if you must, connect GND first.
 
-void setup()
-{
 
-  pinMode(MINUSFIVEMINS, INPUT_PULLUP); //Define pin as input, enable pull-up resistor
-  pinMode(PLUSFIVEMINS, INPUT_PULLUP); //Define pin as input, enable pull-up resistor
-  pinMode(BUTTONLEDMINUS_GND1, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDMINUS_GND2, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDPLUS_GND1, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDPLUS_GND2, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDMINUS_5V1, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDMINUS_5V2, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDPLUS_5V1, OUTPUT); //Define pin as output
-  pinMode(BUTTONLEDPLUS_5V2, OUTPUT); //Define pin as output
+/* ---------- Clock part ---------- */
+RTC_DS3231 rtc;
+char daysOfTheWeek[7][12] = {"Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"};
+
+
+/* ---------- Button part ---------- */
+// this constant won't change:
+const int  btnPin1 = 2;    // the pin that the pushbutton is attached to
+const int  btnPin2 = 3;    // the pin that the pushbutton is attached to
+const int  btnPin3 = 4;    // the pin that the pushbutton is attached to
+volatile int state = 0;
+
+// Variables will change:
+int btnPushCount1 = 0;   // counter for the number of button presses
+int btnPushCount2 = 0;   // counter for the number of button presses
+int btnPushCount3 = 0;   // counter for the number of button presses
+int btnState1 = 0;         // current state of the button
+int btnState2 = 0;         // current state of the button
+int btnState3 = 0;         // current state of the button
+int lastBtnState1 = 0;     // previous state of the button
+int lastBtnState2 = 0;     // previous state of the button
+int lastBtnState3 = 0;     // previous state of the button
+
+int brightness [] = {10, 50, 90};
+int color[4][3] = { { 255, 255, 255 },
+                    { 255, 128, 0 },
+                    { 64, 255, 64 },
+                    { 32, 64, 255 } };
+int timeResetStep = 0;
+int snowstep = 0; // timesteps for the snowing animation
+void setup() {
+
+  // initialize the button pin as a input:
+  pinMode(btnPin1, INPUT_PULLUP);
+  pinMode(btnPin2, INPUT_PULLUP);
+  pinMode(btnPin3, INPUT_PULLUP);
+
   
-  digitalWrite(BUTTONLEDMINUS_GND1, LOW); //Set pin value to LOW
-  digitalWrite(BUTTONLEDMINUS_GND2, LOW); //Set pin value to LOW
-  digitalWrite(BUTTONLEDPLUS_GND1, LOW); //Set pin value to LOW
-  digitalWrite(BUTTONLEDPLUS_GND2, LOW); //Set pin value to LOW
-  digitalWrite(BUTTONLEDMINUS_5V1, HIGH); //Set pin value to HIGH
-  digitalWrite(BUTTONLEDMINUS_5V2, HIGH); //Set pin value to HIGH
-  digitalWrite(BUTTONLEDPLUS_5V1, HIGH); //Set pin value to HIGH
-  digitalWrite(BUTTONLEDPLUS_5V2, HIGH); //Set pin value to HIGH
+  Serial.begin(9600);
   
-  setTime(14,16,00,6,7,2019); //Initialize current time as Midnight/noon 08/31/2015
-  pixels.begin(); //Begin Neopixel string
-  pixels.setBrightness(20); //max is 255
-  Serial.begin(9600); //Begin Serial for debugging purposes
+  strip.begin();
+  strip.setBrightness(brightness[state]); //max is 255
+  strip.show(); // Initialize all pixels to 'off'
+  colorWipe(strip.Color(0, 0, 50), 30);
   
+  //delay(3000); // wait for console opening
+ 
+  if (! rtc.begin()) {
+    Serial.println("Couldn't find RTC");
+    while (1);
+  }
+  if (rtc.lostPower()) {
+    Serial.println("RTC lost power, lets set the time!");
+    // following line sets the RTC to the date & time this sketch was compiled
+    // rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+    rtc.adjust(DateTime(2019, 07, 06, 8, 43, 0));
+    // This line sets the RTC with an explicit date & time, for example to set
+    // January 21, 2014 at 3am you would call:
+    // rtc.adjust(DateTime(2014, 1, 21, 3, 0, 0));
+  }
+  //rtc.adjust(DateTime(2019, 07, 07, 21, 15, 20));
+
 }
 
-void loop()
-{
-  
-  //Declare integer array with size corresponding to number of Neopixels in chain
-  int individualPixels[NUMPIXELS]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-  
-  /* Check for button presses & reset time if necessary */
-  minusCurrState=digitalRead(MINUSFIVEMINS); //Get current state of MINUSFIVEMINS button
-  /* If current state is different from previous state and value is now LOW, subtract five minutes from current time */
-  if ((minusCurrState!=minusPrevState) && (minusCurrState==LOW)){
-    adjustTime(-5*60); //Shift time five minutes backwards
-    minusPrevState=minusCurrState;
+void loop() {
+  btnState1 = digitalRead(btnPin1);
+  if (btnState1 != lastBtnState1) {
+    if (btnState1 == HIGH) {
+      btnPushCount1++;
+      blink();
+      Serial.println("btn1");
+      Serial.print("number of button pushes: ");
+      Serial.println(btnPushCount1);
+    }
+    // Delay a little bit to avoid bouncing
+    delay(50);
+    lastBtnState1 = btnState1;
   }
-  else{
-   minusPrevState=minusCurrState; 
+
+ 
+  btnState2 = digitalRead(btnPin2);
+  if (btnState2 != lastBtnState2) {
+    if (btnState2 == HIGH) {
+      btnPushCount2++;
+      adjustTime(5);
+      Serial.println("btn2");
+      Serial.print("number of button pushes: ");
+      Serial.println(btnPushCount2);
+    }
+    // Delay a little bit to avoid bouncing
+    delay(50);
+    lastBtnState2 = btnState2;
   }
-  
-  plusCurrState=digitalRead(PLUSFIVEMINS); //Get current state of PLUSFIVEMINS button
-  /* If current state is different from previous state and value is now LOW, add five minutes from current time */
-  if ((plusCurrState!=plusPrevState) && (plusCurrState==LOW)){
-    adjustTime(5*60); //Shift time five minutes forwards
-    plusPrevState=plusCurrState;
+
+  btnState3 = digitalRead(btnPin3);
+  if (btnState3 != lastBtnState3) {
+    if (btnState3 == HIGH) {
+      btnPushCount3++;
+      adjustTime(-5);
+      Serial.println("btn3");
+      Serial.print("number of button pushes: ");
+      Serial.println(btnPushCount3);
+    }
+    // Delay a little bit to avoid bouncing
+    delay(50);
+    lastBtnState3 = btnState3;
   }
-    else{
-   plusPrevState=plusCurrState; 
-  }
+
+ 
+  if (state == 12) {
+    strip.setBrightness(40);
+    rainbowCycle(5);
+  } else if (state == 13) {
+    strip.setBrightness(100);
+    heartShape();
+  } else if (state == 14) {
+    strip.setBrightness(40);
+    snow();
+  } else if (state == 15) {
+    strip.setBrightness(20);
+    colorAll(strip.Color(100, 255, 100), 10);
+  } else {
+    DateTime now = rtc.now();
+    if (now.second()%2 == 0) {
+      if (timeResetStep == 1) return;
+      timeResetStep = 1;
+      timeDisplay(now.hour(), now.minute());
+      Serial.print(now.year(), DEC);
+      Serial.print('/');
+      Serial.print(now.month(), DEC);
+      Serial.print('/');
+      Serial.print(now.day(), DEC);
+      Serial.print(" (");
+      Serial.print(daysOfTheWeek[now.dayOfTheWeek()]);
+      Serial.print(") ");
+      Serial.print(now.hour(), DEC);
+      Serial.print(':');
+      Serial.print(now.minute(), DEC);
+      Serial.print(':');
+      Serial.print(now.second(), DEC);
+      Serial.println();
     
-  /* Get current time */
-  h=hourFormat12();    // Returns the hour of current time between 1-12
-  m=minute();        // Returns the minute of current time
-  s=second();        // Returns the second of current time (not used, included for completeness)
-  
-  Serial.print(h);
-  Serial.print(":");
-  Serial.print(m);
-  Serial.print(":");
-  Serial.println(s);
-
-  /* Parse time values to light corresponding pixels */
-  individualPixels[0]=1; //Light "IT"
-  individualPixels[1]=1; //Light "IS" 
-  
-  /* Minutes between 0-5 - Light "O CLOCK" */
-  if ((m>=0 && m<5)){
-    individualPixels[28]=1;
-    individualPixels[29]=1;
-  }
-  
-  /* Minutes between 5-10 or 55-60 - Light "FIVE," "MINUTES" */
-  if ((m>=5 && m<10) || (m>=55 && m<60)){
-    individualPixels[8]=1;
-    individualPixels[9]=1;
-    individualPixels[10]=1;
-  }
-  
-  /* Minutes between 10-15 or 50-55 - Light "TEN," "MINUTES" */
-  if ((m>=10 && m<15) || (m>=50 && m<55)){
-    individualPixels[2]=1;
-    individualPixels[9]=1;
-    individualPixels[10]=1;
-  }
-  
-  /* Minutes between 15-20 or 45-50 - Light "QUARTER" */
-  if ((m>=15 && m<20) || (m>=45 && m<50)){
-    individualPixels[6]=1;
-    individualPixels[7]=1;
-  }
-  
-  /* Minutes between 20-25 or 40-45 - Light "TWENTY," "MINUTES" */
-  if ((m>=20 && m<25) || (m>=40 && m<45)){
-    individualPixels[4]=1;
-    individualPixels[5]=1;
-    individualPixels[9]=1;
-    individualPixels[10]=1;
-  }  
-
-  /* Minutes between 25-30 or 35-40 - Light "TWENTY," "FIVE," "MINUTES" */
-  if ((m>=25 && m<30) || (m>=35 && m<40)){
-    individualPixels[4]=1;
-    individualPixels[5]=1;
-    individualPixels[8]=1;
-    individualPixels[9]=1;
-    individualPixels[10]=1;
-  }
-
-  /* Minutes between 30-35 - Light "HALF" */
-  if ((m>=30 && m<35)){
-    individualPixels[3]=1;
-  }
-  
-  /* Minutes between 5-35 - Light "PAST" */
-  if ((m>=5) && (m<35)){
-    individualPixels[14]=1;
-  }
-  
-  /* Minutes between 35-60 - Light "TO" & MODIFY CURRENT HOUR VALUE */
-  if (m>=35){
-    individualPixels[13]=1;
-    h++; //Add 1 from current hour
-    /*Set time to twelve for hour around midnight, noon */
-    if (h==0){
-      h=12; 
-    }
-    /*Corner case for 12:35-12:59 */
-    if (h==13){
-      h=1;
+      /*Serial.print(" since midnight 1/1/1970 UNIXTIME = ");
+      Serial.print(now.unixtime());
+      Serial.print("s");
+      Serial.println();*/
+    } else {
+      timeResetStep = 0;
     }
   }
 
-  /* Hour=1 - Light "ONE" */
-  if (h==1){
-    individualPixels[12]=1;
-  }
+
   
-  /* Hour=2 - Light "TWO" */
-  if (h==2){
-    individualPixels[11]=1;
-  }
+  // Some example procedures showing how to display to the pixels:
+  // Do not run more than 15 seconds of these, or the b/g tasks
+  // will be blocked.
+  //--------------------------------------------------------------
+
+  //strip.setPixelColor(0, strip.Color(50, 0, 0));
+  //strip.show();
+
+  //colorWipe(strip.Color(255, 0, 0), 1000); // Red
+
+  //colorWipe(strip.Color(0, 255, 0), 1000); // Green
+
+  //colorWipe(strip.Color(0, 0, 255), 1000); // Green
+
+  //rainbow(20);
+
+  //rainbowCycle(5);
+
+  //colorAll(strip.Color(0, 0, 255), 50); // Cyan
   
-  /* Hour=3 - Light "THREE" */
-  if (h==3){
-    individualPixels[15]=1;
-    individualPixels[16]=1;    
+  //heartShape(); delay(5000);
+
+}
+
+// Set all pixels in the strip to a solid color, then wait (ms)
+void colorAll(uint32_t c, uint8_t wait) {
+  uint16_t i;
+
+  for(i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(i, c);
   }
-  
-  /* Hour=4 - Light "FOUR" */
-  if (h==4){
-    individualPixels[17]=1;
+  strip.show();
+  delay(wait);
+}
+
+// Fill the dots one after the other with a color, wait (ms) after each one
+void colorWipe(uint32_t c, uint8_t wait) {
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    strip.setPixelColor(109-i, c);
+    strip.show();
+    delay(wait);
   }
-  
-  /* Hour=5 - Light "FIVE" */
-  if (h==5){
-    individualPixels[18]=1;
-  }
-  
-  /* Hour=6 - Light "SIX" */
-  if (h==6){
-    individualPixels[23]=1;
-  }
-  
-  /* Hour=7 - Light "SEVEN" */
-  if (h==7){
-    individualPixels[21]=1;
-    individualPixels[22]=1;
-  }
-  
-  /* Hour=8 - Light "EIGHT" */
-  if (h==8){
-    individualPixels[19]=1;
-    individualPixels[20]=1;
-  }
-  
-  /* Hour=9 - Light "NINE" */
-  if (h==9){
-    individualPixels[24]=1;
-  }
-  
-  /* Hour=10 - Light "TEN" */
-  if (h==10){
-    individualPixels[25]=1;
-  }
-  
-  /* Hour=11 - Light "ELEVEN" */
-  if (h==11){
-    individualPixels[26]=1;
-    individualPixels[27]=1;
-  }
-  
-  /* Hour=12 - Light "TWELVE" */
-  if (h==12){
-    individualPixels[30]=1;
-    individualPixels[31]=1;
-  }
-  
-  /* Light pixels corresponding to current time */
-  for (int i=0; i<sizeof(individualPixels); i++){
-    if (individualPixels[i]==1){
-      pixels.setPixelColor(i, pixels.Color(red,green,blue)); //Set Neopixel color
+}
+
+void rainbow(uint8_t wait) {
+  uint16_t i, j;
+
+  for(j=0; j<256; j++) {
+    for(i=0; i<strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel((i+j) & 255));
     }
-    else{
-      pixels.setPixelColor(i,pixels.Color(0,0,0));
+    strip.show();
+    delay(wait);
+  }
+}
+
+// Slightly different, this makes the rainbow equally distributed throughout, then wait (ms)
+void rainbowCycle(uint8_t wait) {
+  uint16_t i, j;
+
+  for(j=0; j<256; j++) { // 1 cycle of all colors on wheel
+    for(i=0; i< strip.numPixels(); i++) {
+      strip.setPixelColor(i, Wheel(((i * 256 / strip.numPixels()) + j) & 255));
+    }
+    strip.show();
+    delay(wait);
+    btnState1 = digitalRead(btnPin1);
+    if (btnState1 != lastBtnState1) {
+      if (btnState1 == HIGH) {
+        btnPushCount1++;
+        state++;
+        Serial.println("btn1");
+        Serial.print("number of button pushes: ");
+        Serial.println(btnPushCount1);
+      }
+      // Delay a little bit to avoid bouncing
+      delay(50);
+      lastBtnState1 = btnState1;
+      break;
     }
   }
-  
-  pixels.show(); //Display Neopixel color
-  
-//  /* Clear pixel values for re-assignment during next iteration */
-//  for (int j=0; j<sizeof(individualPixels); j++){
-//      individualPixels[j]=0; //Set array values to 0
-//      pixels.setPixelColor(j, pixels.Color(0,0,0)); //Set Neopixel color to 0 brightness, i.e. off
-//  }
-  
+}
+
+// Input a value 0 to 255 to get a color value.
+// The colours are a transition r - g - b - back to r.
+uint32_t Wheel(byte WheelPos) {
+  if(WheelPos < 85) {
+   return strip.Color(WheelPos * 3, 255 - WheelPos * 3, 0);
+  } else if(WheelPos < 170) {
+   WheelPos -= 85;
+   return strip.Color(255 - WheelPos * 3, 0, WheelPos * 3);
+  } else {
+   WheelPos -= 170;
+   return strip.Color(0, WheelPos * 3, 255 - WheelPos * 3);
+  }
+}
+
+void heartShape() {
+  int shape [] = {0,0,1,1,0,0,0,1,1,0,0,0,1,0,0,1,0,1,0,0,1,0,1,0,0,0,0,1,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,1,0,0,0,0,0,1,0,0,0,1,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0};
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    if (shape[i] == 0) {
+      strip.setPixelColor(109-i, strip.Color(0, 0, 0));
+    } else {
+      strip.setPixelColor(109-i, strip.Color(255, 0, 0));
+    }
+  }
+  strip.show();
+}
+
+void snow() {
+  int start [] = {3, 7, 4, 0, 2, 5, 8, 1, 6, 10, 9};
+  for (int i=0; i<11; i++) {
+    for (int m=0; m<5; m++) {
+      int j = -66*i + start[i] + (snowstep-i-m)*11 + (snowstep-i-m)%2*(5-start[i])*2;
+      for (int k=0; k<10; k++) { // 10 would make the animation end before beginning again
+        if (j>=0 && j<110) { strip.setPixelColor(109-j, strip.Color( 245/(m+1)-245/5,  245/(m+1)-245/5, 255/(m+1)-255/5)); }
+        j -= 594;
+      }
+    }
+  }
+  snowstep++;
+  if (snowstep > 570) { snowstep = 0; Serial.print("most!!!!!!!!"); }
+  strip.show();
+  //Serial.print(snowstep);Serial.println();
+  delay(50);
+  btnState1 = digitalRead(btnPin1);
+  if (btnState1 != lastBtnState1) {
+    if (btnState1 == HIGH) {
+      btnPushCount1++;
+      state++;
+      Serial.println("btn1");
+      Serial.print("number of button pushes: ");
+      Serial.println(btnPushCount1);
+    }
+    // Delay a little bit to avoid bouncing
+    delay(50);
+    lastBtnState1 = btnState1;
+  }
+}
+
+void timeDisplay(uint8_t h, uint8_t m) {
+  int shape [] = {1,1,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0};
+  int eins [] = {82, 83, 84, 85};
+  int zwei [] = {62, 63, 64, 65};
+  int drei [] = {84, 85, 86, 87};
+  int vier [] = {73, 74, 75, 76};
+  int funf [] = {69, 70, 71, 72};
+  int sechs [] = {49, 50, 51, 52, 53};
+  int sieben [] = {77, 78, 79, 80, 81, 82};
+  int acht [] = {89, 90, 91, 92};
+  int neun [] = {103, 104, 105, 106};
+  int zehn [] = {106, 107, 108, 109};
+  int elf [] = {67, 68, 69};
+  int zwolf [] = {94, 95, 96, 97, 98};
+  int funf_min [] = {7, 8, 9, 10};
+  int zehn_min [] = {18, 19, 20, 21};
+  int viertel [] = {26, 27, 28, 29, 30, 31, 32};
+  int zwanzig [] = {11, 12, 13, 14, 15, 16, 17};
+  int dreiviertel [] = {22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32};
+  int vor [] = {36, 37, 38};
+  int nach [] = {40, 41, 42, 43};
+  int halb [] = {44, 45, 46, 47};
+
+  // let's do the minutes first
+  if (m>2 && m<=7) { // 05 funf_min nach
+    for (byte i = 0; i < (sizeof(funf_min) / sizeof(funf_min[0])); i++) { shape[funf_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(nach) / sizeof(nach[0])); i++) { shape[nach[i]] = 1; }
+    
+  } else if (m>7 && m<=12) { // 10 zehn_min nach
+    for (byte i = 0; i < (sizeof(zehn_min) / sizeof(zehn_min[0])); i++) { shape[zehn_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(nach) / sizeof(nach[0])); i++) { shape[nach[i]] = 1; }
+     
+  } else if (m>12 && m<=17) { // 15 viertel nach
+    for (byte i = 0; i < (sizeof(viertel) / sizeof(viertel[0])); i++) { shape[viertel[i]] = 1; }
+    for (byte i = 0; i < (sizeof(nach) / sizeof(nach[0])); i++) { shape[nach[i]] = 1; }
+     
+  } else if (m>17 && m<=22) { // 20 zwanzig nach
+    for (byte i = 0; i < (sizeof(zwanzig) / sizeof(zwanzig[0])); i++) { shape[zwanzig[i]] = 1; }
+    for (byte i = 0; i < (sizeof(nach) / sizeof(nach[0])); i++) { shape[nach[i]] = 1; }
+    
+   } else if (m>22 && m<=27) { // 25 funf_min vor halb
+    h++;
+    for (byte i = 0; i < (sizeof(funf_min) / sizeof(funf_min[0])); i++) { shape[funf_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(vor) / sizeof(vor[0])); i++) { shape[vor[i]] = 1; }
+    for (byte i = 0; i < (sizeof(halb) / sizeof(halb[0])); i++) { shape[halb[i]] = 1; }
+    
+  } else if (m>27 && m<=32) { // 30 halb
+    h++;
+    for (byte i = 0; i < (sizeof(halb) / sizeof(halb[0])); i++) { shape[halb[i]] = 1; }
+    
+  } else if (m>32 && m<=37) { // 35 funf_min nach halb
+    h++;
+    for (byte i = 0; i < (sizeof(funf_min) / sizeof(funf_min[0])); i++) { shape[funf_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(nach) / sizeof(nach[0])); i++) { shape[nach[i]] = 1; }
+    for (byte i = 0; i < (sizeof(halb) / sizeof(halb[0])); i++) { shape[halb[i]] = 1; }
+    
+  } else if (m>37 && m<=42) { // 40 zwanzig vor
+    h++;
+    for (byte i = 0; i < (sizeof(zwanzig) / sizeof(zwanzig[0])); i++) { shape[zwanzig[i]] = 1; }
+    for (byte i = 0; i < (sizeof(vor) / sizeof(vor[0])); i++) { shape[vor[i]] = 1; }
+    
+  } else if (m>42 && m<=47) { // 45 dreiviertel
+    h++;
+    for (byte i = 0; i < (sizeof(dreiviertel) / sizeof(dreiviertel[0])); i++) { shape[dreiviertel[i]] = 1; }
+    
+  } else if (m>47 && m<=52) { // 50 zehn_min vor
+    h++;
+    for (byte i = 0; i < (sizeof(zehn_min) / sizeof(zehn_min[0])); i++) { shape[zehn_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(vor) / sizeof(vor[0])); i++) { shape[vor[i]] = 1; }
+    
+  } else if (m>52 && m<=57) { // 55 funf_min vor
+    h++;
+    for (byte i = 0; i < (sizeof(funf_min) / sizeof(funf_min[0])); i++) { shape[funf_min[i]] = 1; }
+    for (byte i = 0; i < (sizeof(vor) / sizeof(vor[0])); i++) { shape[vor[i]] = 1; }
+    
+  } else if (m>57) {
+    h++;
+  }
+
+  // now let's get to the hours
+  if (h == 0 || h == 12 || h == 24) {
+    for (byte i = 0; i < (sizeof(zwolf) / sizeof(zwolf[0])); i++) { shape[zwolf[i]] = 1; }
+    
+  } else if (h == 1 || h == 13) {
+    for (byte i = 0; i < (sizeof(eins) / sizeof(eins[0])); i++) { shape[eins[i]] = 1; }
+     
+  } else if (h == 2 || h == 14) {
+    for (byte i = 0; i < (sizeof(zwei) / sizeof(zwei[0])); i++) { shape[zwei[i]] = 1; }
+     
+  } else if (h == 3 || h == 15) {
+    for (byte i = 0; i < (sizeof(drei) / sizeof(drei[0])); i++) { shape[drei[i]] = 1; }
+     
+  } else if (h == 4 || h == 16) {
+    for (byte i = 0; i < (sizeof(vier) / sizeof(vier[0])); i++) { shape[vier[i]] = 1; }
+     
+  } else if (h == 5 || h == 17) {
+    for (byte i = 0; i < (sizeof(funf) / sizeof(funf[0])); i++) { shape[funf[i]] = 1; }
+     
+  } else if (h == 6 || h == 18) {
+    for (byte i = 0; i < (sizeof(sechs) / sizeof(sechs[0])); i++) { shape[sechs[i]] = 1; }
+     
+  } else if (h == 7 || h == 19) {
+    for (byte i = 0; i < (sizeof(sieben) / sizeof(sieben[0])); i++) { shape[sieben[i]] = 1; }
+     
+  } else if (h == 8 || h == 20) {
+    for (byte i = 0; i < (sizeof(acht) / sizeof(acht[0])); i++) { shape[acht[i]] = 1; }
+     
+  } else if (h == 9 || h == 21) {
+    for (byte i = 0; i < (sizeof(neun) / sizeof(neun[0])); i++) { shape[neun[i]] = 1; }
+     
+  } else if (h == 10 || h == 22) {
+    for (byte i = 0; i < (sizeof(zehn) / sizeof(zehn[0])); i++) { shape[zehn[i]] = 1; }
+     
+  } else if (h == 11 || h == 23) {
+    for (byte i = 0; i < (sizeof(elf) / sizeof(elf[0])); i++) { shape[elf[i]] = 1; }
+     
+  }
+  for(uint16_t i=0; i<strip.numPixels(); i++) {
+    if (shape[i] == 0) {
+      strip.setPixelColor(109-i, strip.Color(0, 0, 0));
+    } else {
+      strip.setPixelColor(109-i, strip.Color(color[state/3][0], color[state/3][1], color[state/3][2]));
+    }
+  }
+  strip.show();
+}
+
+void blink() {
+  state++;
+  if (state > 15) { //0-11: Color modes. 12-15: fancy effects
+    state = 0;
+  }
+  if (state < 12) {
+    strip.setBrightness(brightness[state%3]); //max is 255
+    DateTime now = rtc.now();
+    timeDisplay(now.hour(), now.minute());
+  }
+}
+
+void adjustTime(int adj) {
+  DateTime now = rtc.now();
+  rtc.adjust(DateTime(now.year(), now.month(), now.day(), now.hour(), now.minute()+adj, now.second()));
+  //colorAll(strip.Color(color[state/3][0], color[state/3][1], color[state/3][2]), 50);
+  now = rtc.now();
+  timeDisplay(now.hour(), now.minute());
 }
