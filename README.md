@@ -1,6 +1,8 @@
 # Word Clock
 Arduino code for Word Clock with RTC and a few effects. This is a DIY replica of the QlockTwo design.
 
+[![Demo video](https://img.youtube.com/vi/Jz-r7BNQk3U/0.jpg)](https://www.youtube.com/watch?v=Jz-r7BNQk3U)
+
 ### Parts:
 - WS2812B (110 leds)
 - Arduino Nano
